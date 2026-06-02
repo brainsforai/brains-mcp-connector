@@ -1,0 +1,28 @@
+{
+  "name": "Brains",
+  "description": "A personal wiki and memory layer for AI assistants. Brains gives Claude and ChatGPT persistent, structured memory backed by your own private wiki — so your AI assistant remembers context across every conversation.",
+  "version": "1.0.0",
+  "homepage": "https://usebrains.app",
+  "documentation": "https://usebrains.app/docs",
+  "privacy_policy": "https://usebrains.app/privacy",
+  "support_email": "hello@usebrains.app",
+  "contact_email": "hello@usebrains.app",
+  "license": "MIT",
+  "mcp": {
+    "transport": ["http", "stdio"],
+    "auth": "oauth2",
+    "oauth2": {
+      "authorization_url": "https://usebrains.app/oauth/authorize",
+      "token_url": "https://usebrains.app/api/oauth/token",
+      "scopes": ["wiki.read", "wiki.write"]
+    }
+  },
+  "categories": ["memory", "productivity", "knowledge-management"],
+  "keywords": ["wiki", "memory", "notes", "knowledge-base", "personal", "mcp"],
+  "data_collection": {
+    "collects_user_data": true,
+    "data_types": ["account_email", "wiki_content", "usage_logs"],
+    "third_party_sharing": false,
+    "data_retention": "until account deletion"
+  }
+}

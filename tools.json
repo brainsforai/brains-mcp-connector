@@ -1,0 +1,835 @@
+[
+  {
+    "name": "list_pages",
+    "description": "List wiki pages with optional filtering by tag or status. PRIMARY routing tool: call list_pages first to get a full inventory. When running with Supabase/Postgres index enabled, this is fast with no file reads; otherwise it falls back to a storage scan. Use the returned names to select candidates, then read_page only those candidates.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tag": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "archived",
+            "draft"
+          ]
+        },
+        "compact": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "read_page",
+    "description": "Read a wiki page by filename, returning content, frontmatter, fileId, revision, and outbound_link_count. REQUIRED retrieval workflow: (1) list_pages first to get inventory, (2) LLM selects candidate files from results, (3) read_page only those candidates, (4) LLM performs synthesis. Do NOT read index.md for routing — when Supabase/Postgres index is enabled the DB index is authoritative; otherwise use list_pages. For small edits, prefer patch_page (especially replace_lines). Use update_page only for intentional full-body rewrites.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "search_pages",
+    "description": "Full-text search across wiki pages. Uses Postgres FTS when Supabase/Postgres index is enabled (fast); falls back to a local scan otherwise. Use for keyword lookups; use list_pages for full inventory and routing.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "maxCandidates": {
+          "type": "number"
+        },
+        "maxResults": {
+          "type": "number"
+        },
+        "maxConcurrency": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "create_page",
+    "description": "Create a new wiki page with frontmatter and body content. Name is auto-normalized to a wiki-safe .md path. Ingest responsibility rule: if source material contains stable facts, active tasks, and decisions, you MUST split it across taxonomy folders (canonical/, projects/, decisions/) and keep data/ as raw synthesis only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "body"
+      ]
+    }
+  },
+  {
+    "name": "create_pages",
+    "description": "Create multiple pages in one call (fast path for ingest decomposition into canonical/projects/decisions/data). Returns compact timing/count summary by default; set verbose=true for per-page results.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "summary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "title",
+              "body"
+            ]
+          }
+        },
+        "verbose": {
+          "type": "boolean"
+        },
+        "runLabel": {
+          "type": "string"
+        },
+        "logTiming": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "pages"
+      ]
+    }
+  },
+  {
+    "name": "import_brain_source",
+    "description": "Deterministic importer for source brain folders. Supports preview mode (execute=false) and execute mode (execute=true) with folder-based routing and car-profile consolidation.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sourceRoot": {
+          "type": "string"
+        },
+        "execute": {
+          "type": "boolean"
+        },
+        "maxFiles": {
+          "type": "number"
+        },
+        "skipRawCatalogs": {
+          "type": "boolean"
+        },
+        "excludeDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "chunkSize": {
+          "type": "number"
+        },
+        "runLabel": {
+          "type": "string"
+        },
+        "logTiming": {
+          "type": "boolean"
+        },
+        "previewLimit": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sourceRoot"
+      ]
+    }
+  },
+  {
+    "name": "export_wiki",
+    "description": "Export wiki pages to a ZIP archive. When outputPath is omitted, returns the ZIP as a base64-encoded string (zipData) — no server filesystem access required, fully agent-reachable. Pass zipData to import_wiki to round-trip without curl. When outputPath is provided, also writes to that server path. Optional: filter by folder prefix (e.g. 'projects/brainsapp') or tags (any matching tag includes the page).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "outputPath": {
+          "type": "string"
+        },
+        "includeSystem": {
+          "type": "boolean"
+        },
+        "folder": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "import_wiki",
+    "description": "Import a wiki from a ZIP archive. Agent-friendly: pass zipData (base64 from export_wiki) instead of zipPath for fully agent-reachable round-trips. Supports preview (execute=false) and execute (execute=true). Modes: mode='additive' updates/creates ZIP pages without deleting others; mode='replace' mirrors the ZIP exactly (imports all ZIP pages and deletes pages absent from the ZIP, always overwrite). When execute applies changes, response includes instructionRefreshRequired/discoveredFolders/nextAction hints for instruction refresh.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "zipData": {
+          "type": "string"
+        },
+        "zipPath": {
+          "type": "string"
+        },
+        "execute": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "additive",
+            "replace"
+          ]
+        },
+        "conflictStrategy": {
+          "type": "string",
+          "enum": [
+            "skip",
+            "overwrite",
+            "merge"
+          ]
+        },
+        "includeSystem": {
+          "type": "boolean"
+        },
+        "logTiming": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "pull_session_bundle",
+    "description": "Downloads all relevant wiki pages for your project as a single plain-text bundle (no ZIP decode needed). Work locally in this conversation, then push back with push_session_bundle when done. 2.6–4.2× faster than reading pages one-by-one. Always set tags (e.g., tag=brainsapp, tag=your-project-slug) and maxBytes=150000 to stay within context limits. Supports folder prefix and tag filters; paginates via nextCursor.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folder": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "query": {
+          "type": "string"
+        },
+        "includeSystem": {
+          "type": "boolean"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "maxBytes": {
+          "type": "number"
+        },
+        "maxPages": {
+          "type": "number"
+        },
+        "session_audience": {
+          "type": "string",
+          "enum": [
+            "internal",
+            "client-safe",
+            "public"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "push_session_bundle",
+    "description": "PREFERRED write-back tool when paired with pull_session_bundle. Two modes: (1) pages mode (recommended) — pass pages=[{name,content}] for each page you modified; avoids token-limit issues with large bundles. (2) bundle mode (small bundles <20 KB only) — pass bundle string + manifest array. Both modes use the same conflict-strategy semantics. Returns ok, created, updated, skipped, and any per-page errors.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "bundle": {
+          "type": "string"
+        },
+        "manifest": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "content"
+            ]
+          }
+        },
+        "conflictStrategy": {
+          "type": "string",
+          "enum": [
+            "overwrite",
+            "skip",
+            "error"
+          ]
+        },
+        "includeSystem": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "purge_wiki",
+    "description": "Permanently delete all wiki pages. Returns a warning and file list when confirm=false. Set confirm=true to proceed. Set exportBeforeDelete=true with exportOutputPath to create a ZIP backup first.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "confirm": {
+          "type": "boolean"
+        },
+        "exportBeforeDelete": {
+          "type": "boolean"
+        },
+        "exportOutputPath": {
+          "type": "string"
+        },
+        "includeSystem": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_page",
+    "description": "FULL REWRITE tool: replaces the page body. Requires fileId and revision from read_page to prevent conflicts. Prefer patch_page for targeted edits (use replace_lines when possible); use update_page when intentionally rewriting most/all content. Ingest responsibility rule: when refining ingest docs, distribute content into canonical/, projects/, and decisions/ pages where appropriate instead of leaving everything in data/.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "fileId": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "frontmatterPatch": {},
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "fileId",
+        "revision",
+        "body"
+      ]
+    }
+  },
+  {
+    "name": "patch_page",
+    "description": "PREFERRED EDIT tool for small/medium changes. Patch a page with surgical edits in one call. Supports text anchors and line-range replacement (replace_lines with 1-based full-file line numbers), and accepts multiple operations in an array. Each operation MUST include a 'type' field (one of: replace, insert_after, insert_before, append, replace_lines). Example replace op: {\"type\": \"replace\", \"find\": \"## Status\\nOld text\", \"replace\": \"## Status\\nNew text\"}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "operations": {
+          "type": "array",
+          "items": {}
+        },
+        "lineNumbersAre": {
+          "type": "string",
+          "enum": [
+            "file"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "operations"
+      ]
+    }
+  },
+  {
+    "name": "move_page",
+    "description": "Archive (prefix with 'archive-') or rename a wiki page. No hard deletion in v1.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "archive",
+            "rename"
+          ]
+        },
+        "newName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "append_log",
+    "description": "Append an entry to the wiki log. Use for ingest, query, lint, and error events.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "ingest",
+            "query",
+            "update",
+            "create",
+            "move",
+            "lint",
+            "error"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "title"
+      ]
+    }
+  },
+  {
+    "name": "health_check",
+    "description": "Check server health: storage backend connectivity (Supabase Storage), search index status (Postgres FTS), uptime, and session log status. Call once at session start to confirm the server is reachable before doing work.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "generate_claude_instructions",
+    "description": "Refresh the Claude instruction block for an EXISTING Brains-connected project. Returns a markdown block the user can paste into their Claude Project system prompt. For NEW projects, call init_project first — it scaffolds the brain pages and emits the same instruction block.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "projectName": {
+          "type": "string"
+        },
+        "variant": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "extended"
+          ]
+        },
+        "projectPage": {
+          "type": "string"
+        },
+        "inScopePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "materialOutcomeDefinition": {
+          "type": "string"
+        },
+        "includeExamples": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "projectName"
+      ]
+    }
+  },
+  {
+    "name": "generate_gpt_instructions",
+    "description": "Refresh the ChatGPT instruction block for an EXISTING Brains-connected project. Returns a markdown block the user can paste into their ChatGPT system prompt. For NEW projects, call init_project first — it scaffolds the brain pages and emits the same instruction block.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "projectName": {
+          "type": "string"
+        },
+        "variant": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "extended"
+          ]
+        },
+        "projectPage": {
+          "type": "string"
+        },
+        "inScopePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "materialOutcomeDefinition": {
+          "type": "string"
+        },
+        "includeExamples": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "projectName"
+      ]
+    }
+  },
+  {
+    "name": "init_project",
+    "description": "FIRST CALL for any new Brains setup. Creates the project brain pages (projects/instructions/decisions scaffolding) and returns a ready-to-paste instruction block for Claude or ChatGPT. Idempotent — safe to re-run. To refresh instructions on an already-initialized project, use generate_claude_instructions or generate_gpt_instructions instead.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "projectSlug": {
+          "type": "string"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "gpt"
+          ]
+        },
+        "variant": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "extended"
+          ]
+        },
+        "writeInstructionFile": {
+          "type": "boolean"
+        },
+        "seedFoundation": {
+          "type": "boolean"
+        },
+        "ensureActiveTrackingPages": {
+          "type": "boolean"
+        },
+        "execute": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "projectName"
+      ]
+    }
+  },
+  {
+    "name": "audit_index",
+    "description": "Diagnose and repair index/storage drift. Reads the Postgres index, checks each entry against the storage backend, and reports ghost rows (in index but not in storage) and unindexed pages (in storage but not in index). Safe read-only by default. Set cleanup=true to delete ghost rows and re-index missing pages. Writes a log entry when cleanup runs. Requires Postgres index to be configured.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cleanup": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "read_governance_audit",
+    "description": "Read governance audit log entries (Hive mode only). Returns server-side access filter events for classification review. Only accessible to exec+ users (access_level ≥ 4) when BRAINS_HIVE_MODE=true.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "extract_links",
+    "description": "Run link extraction over a filtered set of wiki pages. Inserts/updates rows in the server-side wiki_links graph for pages where the on-write hook missed (e.g. legacy pages, ingest backfill). Requires at least one of tags or folder. Returns { pagesProcessed, linksExtracted }. NOTE: pagesProcessed=0 means no stale pages remain — that is success, not failure.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "folder": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_backlinks",
+    "description": "Return the list of pages that link TO the given page (incoming references). Uses the server-side wiki_links graph; pages not yet indexed produce empty results — call extract_links first if needed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "get_related",
+    "description": "Return pages that share outbound link targets with the given page (second-degree neighbors). Uses the server-side wiki_links graph; pages not yet indexed produce empty results — call extract_links first if needed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "suggest_links",
+    "description": "Retroactive linking audit: find wiki pages that lack a '## Related pages' section and return ready-to-apply markdown patches suggesting cross-references. Filters by tags or folder. Uses the server-side link graph (shared outbound targets, backlinks) when available; falls back to tag-overlap heuristics. Never writes — patches require explicit review and confirmation before applying with patch_page.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "folder": {
+          "type": "string"
+        },
+        "maxPages": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "delete_page",
+    "description": "HARD DELETE a single wiki page — removes from storage and index, cannot be undone. Set confirm=false (default) for a dry-run preview (title, path, last updated, size). Set confirm=true to permanently delete. Protected system pages (instructions/brain-routing.md, decisions/readme.md, history/readme.md, log.md, index.md) cannot be deleted. Prefer move_page with action=archive when uncertain — that preserves the page in history/.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "confirm": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "batch_delete_pages",
+    "description": "HARD DELETE up to 50 wiki pages in one call — removes from storage and index, cannot be undone. Set confirm=false (default) for a dry-run manifest. Set confirm=true to permanently delete all listed pages. Protected system pages are silently skipped. Prefer move_page with action=archive when uncertain — that preserves pages in history/.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confirm": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "names"
+      ]
+    }
+  },
+  {
+    "name": "set_webhook",
+    "description": "Create or update an outbound webhook rule. The rule fires a signed POST to the target URL whenever a page matching one of its glob/regex patterns is created or updated. Omit 'id' to create a new rule; pass an existing 'id' to update it. Patterns use glob syntax (e.g. 'projects/brainsapp/open-loop-*.md') or /regex/ syntax.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update"
+            ]
+          }
+        },
+        "secret": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "url",
+        "patterns"
+      ]
+    }
+  },
+  {
+    "name": "list_webhooks",
+    "description": "List all outbound webhook rules configured for the current user.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "remove_webhook",
+    "description": "Permanently delete an outbound webhook rule by ID.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    }
+  },
+  {
+    "name": "add_webhook_pattern",
+    "description": "Append a glob or regex pattern to an existing webhook rule's pattern list. Idempotent — adding a pattern that already exists is a no-op.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "pattern"
+      ]
+    }
+  }
+]
