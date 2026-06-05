@@ -7,7 +7,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://usebrains.app/mcp"
+      "url": "https://lets.usebrains.app/mcp"
     }
   ]
 }
